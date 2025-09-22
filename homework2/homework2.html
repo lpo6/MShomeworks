@@ -1107,116 +1107,330 @@ let galtonResults = {
     distribution: []
 };
 
+// 小球类
+class Ball {
+    constructor() {
+        this.reset();
+    }
+    
+    reset() {
+        const rows = parseInt(document.getElementById('boardRows').value);
+        this.row = 0;
+        this.col = rows / 2; // 从中间开始
+        this.x = this.getXPosition();
+        this.y = this.getYPosition();
+        this.falling = true;
+        this.speed = 3;
+        this.radius = 4;
+        this.landed = false;
+        this.landedY = 0;
+        this.slot = null;
+    }
+    
+    getXPosition() {
+        const rows = parseInt(document.getElementById('boardRows').value);
+        const spacing = this.getSpacing();
+        const offset = (galtonCanvas.width - (rows) * spacing) / 2;
+        return offset + this.col * spacing;
+    }
+    
+    getYPosition() {
+        const rows = parseInt(document.getElementById('boardRows').value);
+        const spacing = this.getSpacing();
+        return this.row * spacing + 20;
+    }
+    
+    getSpacing() {
+        const rows = parseInt(document.getElementById('boardRows').value);
+        return Math.min(galtonCanvas.width, galtonCanvas.height - 100) / (rows + 2);
+    }
+    
+    update() {
+        if (this.landed) return;
+        
+        const rows = parseInt(document.getElementById('boardRows').value);
+        const spacing = this.getSpacing();
+        
+        if (this.falling) {
+            // 向下移动
+            this.y += this.speed;
+            
+            // 检查是否到达下一行
+            const targetY = (this.row + 1) * spacing + 20;
+            if (this.y >= targetY) {
+                this.row++;
+                this.y = targetY;
+                
+                // 随机向左或向右移动
+                if (this.row < rows) {
+                    this.col += Math.random() > 0.5 ? 0.5 : -0.5;
+                    this.x = this.getXPosition();
+                } else {
+                    // 到达底部，准备落地
+                    this.falling = false;
+                    this.landedY = galtonCanvas.height - 30;
+                    // 确定最终槽位
+                    this.slot = Math.round(this.col);
+                    this.slot = Math.min(Math.max(this.slot, 0), rows - 1);
+                }
+            }
+        } else {
+            // 继续下落到最终位置
+            this.y += this.speed;
+            if (this.y >= this.landedY) {
+                this.y = this.landedY;
+                this.landed = true;
+                this.recordLanding();
+            }
+        }
+    }
+    
+    recordLanding() {
+        if (this.slot === null) return;
+        
+        if (!galtonResults.distribution[this.slot]) {
+            galtonResults.distribution[this.slot] = 0;
+        }
+        galtonResults.distribution[this.slot]++;
+        galtonResults.ballsDropped++;
+        
+        // 更新UI
+        document.getElementById('ballsDropped').textContent = galtonResults.ballsDropped;
+        
+        // 更新图表
+        updateGaltonChart();
+    }
+    
+    draw() {
+        galtonCtx.fillStyle = this.landed ? '#3498db' : '#e74c3c';
+        galtonCtx.beginPath();
+        galtonCtx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        galtonCtx.fill();
+        
+        // 为落地的小球添加阴影效果
+        if (this.landed) {
+            galtonCtx.fillStyle = 'rgba(52, 152, 219, 0.5)';
+            galtonCtx.beginPath();
+            galtonCtx.arc(this.x, this.y + 2, this.radius + 1, 0, Math.PI * 2);
+            galtonCtx.fill();
+        }
+    }
+}
+
+let activeBalls = [];
+const maxActiveBalls = 3; // 同时下落的小球数量
+let ballsToDrop = 0;
+
 function drawGaltonBoard() {
     const rows = parseInt(document.getElementById('boardRows').value);
-    const cols = rows;
-    const spacing = Math.min(galtonCanvas.width, galtonCanvas.height) / (rows + 2);
+    const spacing = Math.min(galtonCanvas.width, galtonCanvas.height - 100) / (rows + 2);
     
     galtonCtx.clearRect(0, 0, galtonCanvas.width, galtonCanvas.height);
+    
+    // 绘制背景
+    galtonCtx.fillStyle = '#f8f9fa';
+    galtonCtx.fillRect(0, 0, galtonCanvas.width, galtonCanvas.height);
     
     // 绘制钉子
     galtonCtx.fillStyle = '#2c3e50';
     for (let row = 0; row < rows; row++) {
-        const y = (row + 1) * spacing;
-        const offset = (galtonCanvas.width - (row + 1) * spacing) / 2;
+        const y = (row + 1) * spacing + 20;
+        const offset = (galtonCanvas.width - (row) * spacing) / 2;
         
         for (let col = 0; col <= row; col++) {
-            const x = offset + col * spacing + spacing / 2;
+            const x = offset + col * spacing;
             galtonCtx.beginPath();
             galtonCtx.arc(x, y, 3, 0, Math.PI * 2);
             galtonCtx.fill();
         }
     }
     
-    // 绘制槽位
-    const slotWidth = spacing;
-    const slotHeight = 20;
+    // 绘制底部接收槽
+    const slotHeight = 30;
     const slotTop = galtonCanvas.height - slotHeight;
     
-    galtonCtx.fillStyle = '#ecf0f1';
+    galtonCtx.strokeStyle = '#bdc3c7';
+    galtonCtx.lineWidth = 1;
     for (let i = 0; i <= rows; i++) {
-        const x = (galtonCanvas.width - (rows + 1) * slotWidth) / 2 + i * slotWidth;
-        galtonCtx.fillRect(x, slotTop, slotWidth, slotHeight);
+        const x = (galtonCanvas.width - (rows) * spacing) / 2 + i * spacing;
+        galtonCtx.beginPath();
+        galtonCtx.moveTo(x, slotTop);
+        galtonCtx.lineTo(x, galtonCanvas.height);
+        galtonCtx.stroke();
     }
     
-    // 绘制分布
-    if (galtonResults.distribution.length > 0) {
-        const maxBalls = Math.max(...galtonResults.distribution);
-        galtonCtx.fillStyle = '#4a69bd';
+    // 绘制槽位编号
+    galtonCtx.fillStyle = '#7f8c8d';
+    galtonCtx.font = '12px Arial';
+    galtonCtx.textAlign = 'center';
+    for (let i = 0; i <= rows; i++) {
+        const x = (galtonCanvas.width - (rows) * spacing) / 2 + i * spacing;
+        galtonCtx.fillText(i.toString(), x, galtonCanvas.height - 5);
+    }
+    
+    // 绘制活动中的小球
+    activeBalls.forEach(ball => ball.draw());
+    
+    // 绘制已落地的小球堆
+    drawLandedBalls();
+}
+
+function drawLandedBalls() {
+    const rows = parseInt(document.getElementById('boardRows').value);
+    const spacing = Math.min(galtonCanvas.width, galtonCanvas.height - 100) / (rows + 2);
+    const slotTop = galtonCanvas.height - 30;
+    
+    galtonCtx.fillStyle = '#3498db';
+    
+    for (let slot = 0; slot <= rows; slot++) {
+        const ballCount = galtonResults.distribution[slot] || 0;
+        const x = (galtonCanvas.width - (rows) * spacing) / 2 + slot * spacing;
         
-        for (let i = 0; i < galtonResults.distribution.length; i++) {
-            const x = (galtonCanvas.width - (rows + 1) * slotWidth) / 2 + i * slotWidth;
-            const height = (galtonResults.distribution[i] / maxBalls) * (slotTop - rows * spacing);
-            galtonCtx.fillRect(x + 2, slotTop - height, slotWidth - 4, height);
+        for (let i = 0; i < Math.min(ballCount, 10); i++) { // 最多显示10个小球堆叠
+            const y = slotTop - i * 8 - 4;
+            galtonCtx.beginPath();
+            galtonCtx.arc(x, y, 4, 0, Math.PI * 2);
+            galtonCtx.fill();
+        }
+        
+        // 如果超过10个，显示数字
+        if (ballCount > 10) {
+            galtonCtx.fillStyle = '#2c3e50';
+            galtonCtx.font = '10px Arial';
+            galtonCtx.fillText(ballCount.toString(), x, slotTop - 90);
+            galtonCtx.fillStyle = '#3498db';
         }
     }
 }
 
-function dropBall() {
+function updateGaltonChart() {
+    if (!window.galtonChart) return;
+    
     const rows = parseInt(document.getElementById('boardRows').value);
-    let position = 0;
+    const labels = Array.from({length: rows + 1}, (_, i) => i.toString());
+    const data = labels.map((_, i) => galtonResults.distribution[i] || 0);
     
-    for (let i = 0; i < rows; i++) {
-        position += Math.random() > 0.5 ? 0.5 : -0.5;
+    window.galtonChart.data.labels = labels;
+    window.galtonChart.data.datasets[0].data = data;
+    
+    // 自动调整Y轴范围
+    const maxValue = Math.max(...data, 1);
+    window.galtonChart.options.scales.y.max = Math.ceil(maxValue * 1.1);
+    
+    window.galtonChart.update();
+    
+    // 更新分布形状描述
+    updateDistributionShape();
+}
+
+function updateDistributionShape() {
+    const rows = parseInt(document.getElementById('boardRows').value);
+    const data = Array.from({length: rows + 1}, (_, i) => galtonResults.distribution[i] || 0);
+    
+    if (data.length === 0) {
+        document.getElementById('distributionShape').textContent = '-';
+        return;
     }
     
-    const slot = Math.round((position + rows / 2) * 2) / 2;
-    const normalizedSlot = Math.min(Math.max(slot, 0), rows);
+    // 计算分布形状（简单判断）
+    const maxIndex = data.indexOf(Math.max(...data));
+    const isSymmetric = Math.abs(maxIndex - rows / 2) <= 1;
     
-    if (!galtonResults.distribution[normalizedSlot]) {
-        galtonResults.distribution[normalizedSlot] = 0;
+    if (isSymmetric) {
+        document.getElementById('distributionShape').textContent = '正态分布（对称）';
+    } else if (maxIndex < rows / 2) {
+        document.getElementById('distributionShape').textContent = '左偏分布';
+    } else {
+        document.getElementById('distributionShape').textContent = '右偏分布';
     }
-    galtonResults.distribution[normalizedSlot]++;
-    galtonResults.ballsDropped++;
+}
+
+function updateGaltonAnimation() {
+    // 更新所有小球位置
+    activeBalls.forEach(ball => ball.update());
     
-    // 更新UI
-    document.getElementById('ballsDropped').textContent = galtonResults.ballsDropped;
+    // 移除已经落地的小球（保留用于显示）
+    activeBalls = activeBalls.filter(ball => !ball.landed || Math.random() > 0.1); // 保留10%的落地小球用于显示
     
-    // 更新图表
-    if (window.galtonChart) {
-        const labels = Array.from({length: rows + 1}, (_, i) => i.toString());
-        window.galtonChart.data.labels = labels;
-        window.galtonChart.data.datasets[0].data = labels.map((_, i) => galtonResults.distribution[i] || 0);
-        window.galtonChart.update();
+    // 添加新小球（如果还有小球要下落且未达到最大数量）
+    if (activeBalls.length < maxActiveBalls && ballsToDrop > 0) {
+        activeBalls.push(new Ball());
+        ballsToDrop--;
     }
     
+    // 重绘画板
     drawGaltonBoard();
-    return galtonResults.ballsDropped < parseInt(document.getElementById('ballCount').value);
+    
+    // 检查是否完成
+    if (ballsToDrop === 0 && activeBalls.length === 0) {
+        clearInterval(galtonAnimationId);
+        galtonAnimationId = null;
+        
+        // 最终更新图表
+        updateGaltonChart();
+        return;
+    }
 }
 
 function startGaltonSimulation() {
     const speed = document.getElementById('galtonAnimationSpeed').value;
-    const speeds = { slow: 200, medium: 50, fast: 10, instant: 0 };
+    const speeds = { slow: 100, medium: 50, fast: 20, instant: 0 };
     const delay = speeds[speed];
     
+    // 设置要下落的小球总数
+    ballsToDrop = parseInt(document.getElementById('ballCount').value) - galtonResults.ballsDropped;
+    
     if (delay === 0) {
-        // 立即完成
-        const total = parseInt(document.getElementById('ballCount').value);
-        for (let i = 0; i < total; i++) {
-            dropBall();
-        }
-    } else {
-        // 动画模式
-        function animate() {
-            const continueAnimation = dropBall();
-            if (continueAnimation) {
-                galtonAnimationId = setTimeout(animate, delay);
+        // 立即完成剩余的小球
+        const rows = parseInt(document.getElementById('boardRows').value);
+        
+        for (let i = 0; i < ballsToDrop; i++) {
+            let position = rows / 2;
+            for (let j = 0; j < rows; j++) {
+                position += Math.random() > 0.5 ? 0.5 : -0.5;
             }
+            
+            const slot = Math.round(position);
+            const normalizedSlot = Math.min(Math.max(slot, 0), rows);
+            
+            if (!galtonResults.distribution[normalizedSlot]) {
+                galtonResults.distribution[normalizedSlot] = 0;
+            }
+            galtonResults.distribution[normalizedSlot]++;
         }
-        animate();
+        
+        galtonResults.ballsDropped += ballsToDrop;
+        ballsToDrop = 0;
+        
+        // 更新UI和图表
+        document.getElementById('ballsDropped').textContent = galtonResults.ballsDropped;
+        updateGaltonChart();
+        drawGaltonBoard();
+    } else {
+        // 动画模式 - 先添加初始小球
+        while (activeBalls.length < Math.min(maxActiveBalls, ballsToDrop)) {
+            activeBalls.push(new Ball());
+            ballsToDrop--;
+        }
+        
+        // 启动动画循环
+        if (galtonAnimationId) clearInterval(galtonAnimationId);
+        galtonAnimationId = setInterval(updateGaltonAnimation, delay);
     }
 }
 
 function resetGaltonSimulation() {
     if (galtonAnimationId) {
-        clearTimeout(galtonAnimationId);
+        clearInterval(galtonAnimationId);
         galtonAnimationId = null;
     }
     
+    activeBalls = [];
     galtonResults = {
         ballsDropped: 0,
         distribution: []
     };
+    ballsToDrop = 0;
     
     document.getElementById('ballsDropped').textContent = '0';
     document.getElementById('distributionShape').textContent = '-';
@@ -1232,6 +1446,9 @@ function resetGaltonSimulation() {
 
 // 初始化高尔顿钉板
 drawGaltonBoard();
+
+
+
 
 // 生日问题实现代码
 const birthdayCanvas = document.getElementById('birthdayCanvas');
@@ -1511,3 +1728,4 @@ document.getElementById('resetRoom').addEventListener('click', resetRoomSimulati
     </script>
 </body>
 </html>
+
